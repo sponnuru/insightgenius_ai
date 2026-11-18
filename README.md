@@ -3,11 +3,14 @@
 A one-page web app where members:
 
 - sign in with an email link (no passwords)
-- build a visual **goal tree**: big goals branch from "My Journey", and steps branch from goals
+- build a visual **goal tree**: big goals branch from "My Journey", and steps branch from goals, to any depth; branches expand and collapse
 - edit any goal: title, long/short-term, progress, notes, mark complete, delete
-- click **AI: break it down** to have Claude add 3–5 steps under a goal
-- get **Suggested next steps** from AI, which are flagged "out of date" whenever the tree changes
-- have a fair-use limit on AI (default **10 requests per 3 hours** per member)
+- press **✦** to have Claude break a goal into 3–15 steps (each new step also gets 2–3 learning resources)
+- open **Resources** for any step: videos, classes, books, events and communities, each with a search link to check it
+- press **Do** to run an AI agent on a step ("Do it for me"): it drafts, researches or plans, adds follow-up steps, and lists anything that needs your approval (nothing is ever sent for you)
+- press **Plan my day** for an AI schedule built from all goals and their progress
+- switch between Night and Day mode
+- have a fair-use limit on AI (default **10 requests per 3 hours** per member; resources for brand-new AI steps are free)
 
 Everything is saved to a real database, and each member can only see their own goals.
 
@@ -55,6 +58,9 @@ Everything is saved to a real database, and each member can only see their own g
 
 ---
 
+## Upgrading an existing install to Goal Tree v2
+Paste the whole of `supabase/migrations/002_goal_tree_v2.sql` into **Supabase → SQL Editor → New query** and click **Run** (safe to run twice). Vercel redeploys the code by itself when it lands on `main`.
+
 ## Optional settings (Vercel → Settings → Environment Variables)
 
 | Name | Default | What it does |
@@ -91,9 +97,12 @@ There's no fixed limit in the code; capacity comes from your service plans:
 
 ## What's in the folder
 ```
-app/page.js            the whole page: sign-in, goal tree, editor, suggestions
-app/api/ai/route.js    server route: checks the member, applies the limit, calls Claude
+app/page.js            the page: sign-in, saving, and wiring everything together
 components/GoalTree.js draws the tree
+components/Panels.js   edit, resources, "Do it for me", today's plan, delete dialog
+app/api/ai/route.js    server route for ✦ breakdown, resources and Plan my day
+app/api/agent/route.js server route for the "Do it for me" agent (streams its progress)
+lib/server/ai.js       shared server code: sign-in check, AI limit, Claude calls
 lib/supabaseClient.js  browser connection to Supabase
 supabase/schema.sql    tables plus security rules (paste into Supabase)
 .env.example           list of settings you need
