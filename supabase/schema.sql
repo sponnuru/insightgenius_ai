@@ -59,3 +59,15 @@ drop trigger if exists goals_touch on public.goals;
 create trigger goals_touch before update on public.goals for each row execute function public.touch_updated_at();
 drop trigger if exists profiles_touch on public.profiles;
 create trigger profiles_touch before update on public.profiles for each row execute function public.touch_updated_at();
+
+-- 5. Goal Tree v2: resources and agent results on each goal, page settings per member
+alter table public.goals add column if not exists resources jsonb;
+alter table public.goals add column if not exists result    jsonb;
+alter table public.profiles add column if not exists settings jsonb not null default '{}'::jsonb;
+
+-- 6. Let signed-in members use the tables (row security still limits each member to their own rows)
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on public.goals to authenticated;
+grant select, insert, update on public.profiles to authenticated;
+grant select, insert on public.ai_usage to authenticated;
+grant usage, select on sequence public.ai_usage_id_seq to authenticated;
