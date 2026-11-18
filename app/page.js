@@ -9,6 +9,25 @@ const GOAL_COLUMNS = 'id,parent_id,title,category,progress,notes,resources,resul
 const DEFAULT_SETTINGS = { theme: 'dark', collapsed: [], steps: 5, plan: null, planHours: 3, seeded: false };
 const THEME_KEY = 'ig-theme';
 
+const SOCIAL = [
+  { name: 'X', href: 'https://x.com/ponnuru_satya' },
+  { name: 'Instagram', href: 'https://www.instagram.com/ponnuru_satya' },
+];
+
+function SocialLinks() {
+  return (
+    <p className="social small muted">
+      Follow InsightGenius AI on{' '}
+      {SOCIAL.map((s, i) => (
+        <span key={s.name}>
+          {i > 0 && ' and '}
+          <a className="link" href={s.href} target="_blank" rel="noopener noreferrer">{s.name}</a>
+        </span>
+      ))}
+    </p>
+  );
+}
+
 const readLocal = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const writeLocal = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch {} };
 // Data from storage may come back read-only, so always work on a deep copy.
@@ -66,6 +85,7 @@ function Login() {
             {state === 'error' && <div className="note err" style={{ marginTop: 12 }}>{msg}</div>}
           </form>
         )}
+        <SocialLinks />
       </div>
     </div>
   );
@@ -472,6 +492,8 @@ function GoalApp({ session }) {
             <AddGoalPanel onAdd={addGoal} />
           )}
         </div>
+
+        <SocialLinks />
       </div>
 
       {confirm && <ConfirmDialog goal={confirm} count={countDesc(confirm.id)} onCancel={() => setConfirm(null)} onConfirm={() => deleteGoal(confirm)} />}
