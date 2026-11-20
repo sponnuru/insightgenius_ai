@@ -3,10 +3,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import GoalTree, { buildTree } from '../components/GoalTree';
-import { AddGoalPanel, AgentPanel, ConfirmDialog, EditPanel, PlanCard, ResourcesPanel, todayKey } from '../components/Panels';
+import { AddGoalPanel, AgentPanel, ConfirmDialog, EditPanel, MyDataCard, PlanCard, ResourcesPanel, todayKey } from '../components/Panels';
+import Galaxy from '../components/Galaxy';
+import Confetti from '../components/Confetti';
 
 const GOAL_COLUMNS = 'id,parent_id,title,category,progress,notes,resources,result,created_at';
-const DEFAULT_SETTINGS = { theme: 'dark', collapsed: [], steps: 5, plan: null, planHours: 3, seeded: false };
+const DEFAULT_SETTINGS = { theme: 'dark', collapsed: [], steps: 5, plan: null, planHours: 3, seeded: false, view: 'tree', signals: null, dirSig: null };
+
+/** A short signature of the goal list (ids and titles), used to tell when "My data" directions are out of date. */
+function goalsSig(goals) {
+  const str = goals.map((g) => `${g.id}:${g.title}`).sort().join('|');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+  return String(h >>> 0);
+}
 const THEME_KEY = 'ig-theme';
 
 const readLocal = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
@@ -90,10 +100,17 @@ function GoalApp({ session }) {
   const [planBusy, setPlanBusy] = useState(false);
   const [run, setRun] = useState(null); // { goalId, running, log, error }
   const [confirm, setConfirm] = useState(null);
+  const [sources, setSources] = useState([]);
+  const [dataOpen, setDataOpen] = useState(false);
+  const [dataBusy, setDataBusy] = useState({ dir: false, impact: false });
+  const [reducedMotion, setReducedMotion] = useState(false);
 
   const goalsRef = useRef(goals); goalsRef.current = goals;
   const settingsRef = useRef(settings); settingsRef.current = settings;
-  const pending = useRef({ goals: new Map(), settings: false });
+  const sourcesRef = useRef(sources); sourcesRef.current = sources;
+  const pending = useRef({ goals: new Map(), settings: false, sources: false });
+  const galaxyRef = useRef(null);
+  const confettiRef = useRef(null);
   const queue = useRef(Promise.resolve());
   const timer = useRef(null);
   const agentAbort = useRef(null);
@@ -113,8 +130,9 @@ function GoalApp({ session }) {
     clearTimeout(timer.current);
     const goalPatches = pending.current.goals;
     const settingsDirty = pending.current.settings;
-    pending.current = { goals: new Map(), settings: false };
-    if (!goalPatches.size && !settingsDirty) return queue.current;
+    const sourcesDirty = pending.current.sources;
+    pending.current = { goals: new Map(), settings: false, sources: false };
+    if (!goalPatches.size && !settingsDirty && !sourcesDirty) return queue.current;
     return enqueue(async () => {
       for (const [id, patch] of goalPatches) {
         const { error } = await supabase.from('goals').update(patch).eq('id', id);
@@ -124,7 +142,11 @@ function GoalApp({ session }) {
         const { error } = await supabase.from('profiles').upsert({ user_id: user.id, settings: settingsRef.current });
         if (error) throw error;
       }
-      if (!pending.current.goals.size && !pending.current.settings) setSaveState('saved');
+      if (sourcesDirty) {
+        const { error } = await supabase.from('member_data').upsert({ user_id: user.id, sources: sourcesRef.current });
+        if (error) throw error;
+      }
+      if (!pending.current.goals.size && !pending.current.settings && !pending.current.sources) setSaveState('saved');
     });
   }, [enqueue, user.id]);
 
@@ -143,14 +165,24 @@ function GoalApp({ session }) {
   // Keep a copy in this browser as a fallback.
   useEffect(() => { if (loaded) writeLocal(localKey, { goals, settings }); }, [goals, settings, loaded, localKey]);
   useEffect(() => { applyTheme(settings.theme); }, [settings.theme]);
+  useEffect(() => {
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)');
+    if (!mq) return;
+    setReducedMotion(mq.matches);
+    const on = (e) => setReducedMotion(e.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
 
   /* ----- load ----- */
   useEffect(() => {
     (async () => {
-      const [g, p] = await Promise.all([
-        supabase.from('goals').select(GOAL_COLUMNS).order('created_at'),
+      const [g, p, d] = await Promise.all([
+        supabase.from('goals').select(GOAL_COLUMNS).eq('user_id', user.id).order('created_at'),
         supabase.from('profiles').select('settings').eq('user_id', user.id).maybeSingle(),
+        supabase.from('member_data').select('sources').eq('user_id', user.id).maybeSingle(),
       ]);
+      if (!d.error && Array.isArray(d.data?.sources)) setSources(deepCopy(d.data.sources));
       if (g.error) {
         const local = deepCopy(readLocal(localKey));
         setError('Could not load your goals from your account (' + g.error.message + ').' + (local ? ' Showing the copy saved in this browser.' : ''));
@@ -197,11 +229,56 @@ function GoalApp({ session }) {
   }, [schedule]);
 
   const updateGoal = useCallback((id, patch) => {
+    const before = goalsRef.current.find((g) => g.id === id);
+    if (before && before.progress < 100 && patch.progress >= 100) celebrate(id);
     setGoals((gs) => gs.map((g) => (g.id === id ? { ...g, ...patch } : g)));
     const prev = pending.current.goals.get(id) || {};
     pending.current.goals.set(id, { ...prev, ...patch });
     schedule();
   }, [schedule]);
+
+  function celebrate(id) {
+    setTimeout(() => {
+      let pt = null;
+      if (settingsRef.current.view === 'galaxy') pt = galaxyRef.current?.screenPos(id);
+      else {
+        const r = treeRef.current?.querySelector(`[data-node="${id}"] .bg`)?.getBoundingClientRect();
+        if (r) pt = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+      if (pt) confettiRef.current?.fire(pt.x, pt.y);
+    }, 30);
+  }
+
+  const updateSources = useCallback((list) => {
+    setSources(list);
+    sourcesRef.current = list;
+    pending.current.sources = true;
+    schedule();
+  }, [schedule]);
+
+  async function updateDirections() {
+    setError('');
+    setDataBusy((b) => ({ ...b, dir: true }));
+    try {
+      await flush();
+      const { directions } = await callAI({ action: 'directions' });
+      const byId = Object.fromEntries(directions.map((d) => [d.id, d.direction]));
+      updateSources(sourcesRef.current.map((s) => (s.id in byId ? { ...s, direction: byId[s.id] } : s)));
+      updateSettings({ dirSig: goalsSig(goalsRef.current) });
+    } catch (e) { setError(e.message); }
+    setDataBusy((b) => ({ ...b, dir: false }));
+  }
+
+  async function analyzeImpact() {
+    setError('');
+    setDataBusy((b) => ({ ...b, impact: true }));
+    try {
+      await flush();
+      const { signals } = await callAI({ action: 'impact' });
+      updateSettings({ signals: { ...signals, at: new Date().toISOString(), sig: goalsSig(goalsRef.current) } });
+    } catch (e) { setError(e.message); }
+    setDataBusy((b) => ({ ...b, impact: false }));
+  }
 
   const mergeGoals = (rows) => setGoals((gs) => {
     const byId = new Map(rows.map((r) => [r.id, r]));
@@ -416,6 +493,10 @@ function GoalApp({ session }) {
   const parent = selected?.parent_id ? goals.find((g) => g.id === selected.parent_id) : null;
   const collapsed = useMemo(() => new Set(settings.collapsed), [settings.collapsed]);
   const busyIds = useMemo(() => new Set([...busyBreak, ...(run?.running ? [run.goalId] : [])]), [busyBreak, run]);
+  const signalMap = useMemo(() => Object.fromEntries((settings.signals?.items || []).map((i) => [i.goalId, i.trend])), [settings.signals]);
+  const dataItem = selected ? settings.signals?.items?.find((i) => i.goalId === selected.id) : null;
+  const dirStale = !!settings.dirSig && sources.length > 0 && settings.dirSig !== goalsSig(goals);
+  const isGalaxy = settings.view === 'galaxy';
   const statusText = saveState === 'saving' ? 'Saving…' : saveState === 'local' ? 'Saved in this browser' : 'Saved to your account';
 
   return (
@@ -432,8 +513,10 @@ function GoalApp({ session }) {
 
       <div className="wrap">
         <div className="toolbar">
-          <button className="btn sm" onClick={collapseAll}>Collapse all</button>
+          {!isGalaxy && <button className="btn sm" onClick={collapseAll}>Collapse all</button>}
           <button className="btn sm teal" onClick={() => setPlanOpen(true)}>Plan my day</button>
+          <button className="btn sm" onClick={() => updateSettings({ view: isGalaxy ? 'tree' : 'galaxy' })}>{isGalaxy ? 'Tree view' : '3D view'}</button>
+          <button className="btn sm" onClick={() => setDataOpen((o) => !o)}>My data</button>
         </div>
 
         {error && (
@@ -448,19 +531,32 @@ function GoalApp({ session }) {
             onToggle={(itemId) => updateSettings((s) => ({ plan: { ...s.plan, items: s.plan.items.map((i) => (i.id === itemId ? { ...i, done: !i.done } : i)) } }))} />
         )}
 
-        <div className="tree" ref={treeRef}>
-          {loaded ? (
-            <GoalTree goals={goals} name={settings.name || 'You'} selectedId={selectedId} collapsed={collapsed}
-              busyIds={busyIds} flashIds={flashIds} onSelect={setSelectedId} onToggle={toggle}
-              onDelete={(g) => setConfirm(g)} onDo={openAgent} onBreak={breakDown} />
-          ) : <div className="empty"><span className="spin" /></div>}
-        </div>
+        {dataOpen && (
+          <MyDataCard sources={sources} signals={settings.signals} goals={goals} dirStale={dirStale} busy={dataBusy}
+            onChange={updateSources} onDirections={updateDirections} onAnalyze={analyzeImpact} onReveal={reveal}
+            onClose={() => setDataOpen(false)} onError={setError} />
+        )}
+
+        {isGalaxy && loaded ? (
+          <div className="tree galaxy-pane">
+            <Galaxy ref={galaxyRef} goals={goals} selectedId={selectedId} busyIds={busyBreak} agentId={run?.running ? run.goalId : null}
+              signals={signalMap} onSelect={setSelectedId} reducedMotion={reducedMotion} />
+          </div>
+        ) : (
+          <div className="tree" ref={treeRef}>
+            {loaded ? (
+              <GoalTree goals={goals} name={settings.name || 'You'} selectedId={selectedId} collapsed={collapsed}
+                busyIds={busyIds} flashIds={flashIds} signals={signalMap} onSelect={setSelectedId} onToggle={toggle}
+                onDelete={(g) => setConfirm(g)} onDo={openAgent} onBreak={breakDown} />
+            ) : <div className="empty"><span className="spin" /></div>}
+          </div>
+        )}
 
         <div className="panels">
           {selected ? (
             <>
               <EditPanel key={selected.id} goal={selected} parent={parent} childCount={(children[selected.id] || []).length}
-                steps={settings.steps} busy={busyBreak.has(selected.id)} remaining={remaining}
+                steps={settings.steps} busy={busyBreak.has(selected.id)} remaining={remaining} dataItem={dataItem}
                 onSetSteps={(n) => updateSettings({ steps: n })} onUpdate={(patch) => updateGoal(selected.id, patch)}
                 onBreak={() => breakDown(selected)} onAddStep={(t) => addGoal(t, 'short', selected.id)}
                 onDelete={() => setConfirm(selected)} onClose={() => setSelectedId(null)} />
@@ -474,6 +570,7 @@ function GoalApp({ session }) {
         </div>
       </div>
 
+      <Confetti ref={confettiRef} />
       {confirm && <ConfirmDialog goal={confirm} count={countDesc(confirm.id)} onCancel={() => setConfirm(null)} onConfirm={() => deleteGoal(confirm)} />}
     </>
   );

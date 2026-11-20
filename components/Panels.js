@@ -19,7 +19,7 @@ const searchUrl = (r) =>
 const copy = (text) => navigator.clipboard?.writeText(text).catch(() => {});
 
 /* ---------------- Edit panel ---------------- */
-export function EditPanel({ goal, parent, childCount, steps, busy, remaining, onSetSteps, onUpdate, onBreak, onAddStep, onDelete, onClose }) {
+export function EditPanel({ goal, parent, childCount, steps, busy, remaining, dataItem, onSetSteps, onUpdate, onBreak, onAddStep, onDelete, onClose }) {
   const [title, setTitle] = useState(goal.title);
   const [newStep, setNewStep] = useState('');
   const [other, setOther] = useState(STEP_CHOICES.includes(steps) ? '' : String(steps));
@@ -55,6 +55,7 @@ export function EditPanel({ goal, parent, childCount, steps, busy, remaining, on
       <div className="field">
         <label className="f" htmlFor="gp">Progress: {goal.progress}%</label>
         <input id="gp" type="range" min="0" max="100" step="5" value={goal.progress} onChange={(e) => onUpdate({ progress: +e.target.value })} />
+        <DataSays item={dataItem} current={goal.progress} onSet={(n) => onUpdate({ progress: n })} />
       </div>
 
       <div className="field">
@@ -337,4 +338,116 @@ export function Markdown({ text }) {
     if (b.h) return <h4 key={i}>{inline(b.h)}</h4>;
     return <p key={i}>{inline(b.p)}</p>;
   });
+}
+
+/* ---------------- My data ---------------- */
+const MAX_SOURCES = 6, MAX_CHARS = 12000, MAX_FILE = 2 * 1024 * 1024;
+const TREND = { up: ['Helping', 'up'], down: ['Slowing', 'down'], flat: ['Neutral', 'flat'] };
+
+export function MyDataCard({ sources, signals, goals, dirStale, busy, readOnly, onChange, onDirections, onAnalyze, onReveal, onClose, onError }) {
+  const [mode, setMode] = useState('note');
+  const [name, setName] = useState('');
+  const [text, setText] = useState('');
+  const byId = Object.fromEntries(goals.map((g) => [g.id, g]));
+  const full = sources.length >= MAX_SOURCES;
+
+  const add = (src) => {
+    const t = String(src.text || '');
+    onChange([...sources, { id: crypto.randomUUID(), kind: src.kind, name: src.name.slice(0, 120), text: t.slice(0, MAX_CHARS), cut: t.length > MAX_CHARS, direction: '', at: new Date().toISOString() }]);
+  };
+
+  async function onFile(e) {
+    const f = e.target.files?.[0];
+    e.target.value = '';
+    if (!f) return;
+    if (f.size > MAX_FILE) return onError('That file is over 2 MB. Try a smaller text file.');
+    if (!/\.(txt|csv|md|json)$/i.test(f.name)) return onError('Please choose a .txt, .csv, .md or .json file.');
+    add({ kind: 'file', name: f.name, text: await f.text() });
+  }
+
+  return (
+    <div className="card mydata">
+      <div className="card-h">
+        <h2 style={{ flex: 1 }}>My data</h2>
+        <button className="btn ghost sm" onClick={onClose} aria-label="Close My data">✕</button>
+      </div>
+
+      {!readOnly && (
+        <>
+          <p className="small muted" style={{ margin: '0 0 12px' }}>Add real information about yourself, and AI shows which goals it's helping or slowing. Up to {MAX_SOURCES} sources, {MAX_CHARS.toLocaleString()} characters each.</p>
+          {sources.map((s) => (
+            <div className="src" key={s.id}>
+              <div className="row">
+                <span className="pill type">{s.kind}</span><b style={{ flex: 1, minWidth: 0, overflowWrap: 'anywhere' }}>{s.name}</b>
+                <span className="small muted">{s.text.length.toLocaleString()} chars{s.cut ? ' (cut)' : ''}</span>
+                <button className="btn ghost sm danger" onClick={() => onChange(sources.filter((x) => x.id !== s.id))}>Remove</button>
+              </div>
+              <label className="small muted" htmlFor={'dir' + s.id}>Direction: what to look for</label>
+              <input id={'dir' + s.id} type="text" maxLength={400} value={s.direction || ''} placeholder="e.g. hours spent studying, applications sent"
+                onChange={(e) => onChange(sources.map((x) => (x.id === s.id ? { ...x, direction: e.target.value } : x)))} />
+            </div>
+          ))}
+
+          {!full && (
+            <div className="src add">
+              <div className="chips" style={{ marginBottom: 8 }}>
+                <button className={`chip sm ${mode === 'note' ? 'on' : ''}`} onClick={() => setMode('note')}>Note</button>
+                <button className={`chip sm ${mode === 'file' ? 'on' : ''}`} onClick={() => setMode('file')}>File</button>
+              </div>
+              {mode === 'note' ? (
+                <form onSubmit={(e) => { e.preventDefault(); if (!text.trim()) return; add({ kind: 'note', name: name.trim() || 'Note', text }); setName(''); setText(''); }}>
+                  <input type="text" maxLength={120} value={name} onChange={(e) => setName(e.target.value)} placeholder="Name, e.g. Weekly journal" aria-label="Note name" style={{ marginBottom: 8 }} />
+                  <textarea value={text} onChange={(e) => setText(e.target.value)} placeholder="Type or paste text" aria-label="Note text" />
+                  <button className="btn sm" style={{ marginTop: 8 }}>Add note</button>
+                </form>
+              ) : (
+                <label className="btn sm filebtn">Choose a text file (txt, csv, md, json)
+                  <input type="file" accept=".txt,.csv,.md,.json,text/plain,text/csv,text/markdown,application/json" onChange={onFile} hidden />
+                </label>
+              )}
+            </div>
+          )}
+
+          {dirStale && <div className="note" style={{ margin: '10px 0' }}>Your goals changed since the directions were written. Update them so the analysis looks for the right things.</div>}
+          <div className="row" style={{ margin: '12px 0' }}>
+            <button className="btn sm" disabled={!sources.length || busy.dir} onClick={onDirections}>{busy.dir ? <><span className="spin" /> Updating…</> : 'Update directions from my goals'}</button>
+            <button className="btn sm teal" disabled={!sources.length || busy.impact} onClick={onAnalyze}>{busy.impact ? <><span className="spin" /> Analyzing…</> : 'Analyze impact'}</button>
+          </div>
+        </>
+      )}
+
+      {signals ? (
+        <div className="signals">
+          <div className="small muted">Analyzed {new Date(signals.at).toLocaleString()}</div>
+          <p style={{ margin: '6px 0 10px' }}>{signals.summary}</p>
+          {signals.items.filter((it) => byId[it.goalId]).map((it) => (
+            <div className={`sig ${it.trend}`} key={it.goalId}>
+              <span className={`pill trend ${TREND[it.trend][1]}`}>{TREND[it.trend][0]}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <button className="linkbtn" onClick={() => onReveal(it.goalId)}>{byId[it.goalId].title}</button>
+                <div className="small">{it.evidence}</div>
+                {it.source && <div className="small muted">Source: {it.source}</div>}
+              </div>
+            </div>
+          ))}
+          {!signals.items.length && <div className="small muted">The data didn't clearly speak to any goal.</div>}
+        </div>
+      ) : readOnly ? <div className="empty">No analysis yet.</div> : null}
+    </div>
+  );
+}
+
+/** "What your data says" block for the edit panel. */
+export function DataSays({ item, current, readOnly, onSet }) {
+  if (!item) return null;
+  return (
+    <div className={`datasays ${item.trend}`}>
+      <div className="small"><b>What {readOnly ? 'their' : 'your'} data says:</b> <span className={`trend-word ${item.trend}`}>{TREND[item.trend][0]}</span></div>
+      <div className="small">{item.evidence}</div>
+      {item.source && <div className="small muted">Source: {item.source}</div>}
+      {!readOnly && item.suggested != null && item.suggested !== current && (
+        <button className="btn sm" style={{ marginTop: 6 }} onClick={() => onSet(item.suggested)}>Set progress to {item.suggested}%</button>
+      )}
+    </div>
+  );
 }

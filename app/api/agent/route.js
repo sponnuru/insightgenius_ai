@@ -87,7 +87,7 @@ const AGENT_SYSTEM =
 export async function POST(req) {
   const auth = await authenticate(req);
   if (auth.error) return auth.error;
-  const { db } = auth;
+  const { db, user } = auth;
 
   const body = await req.json().catch(() => ({}));
   const instruction = clean(body.instruction, 1000) || 'Do the most useful next thing for this step.';
@@ -96,7 +96,7 @@ export async function POST(req) {
   if (limit.error) return limit.error;
 
   let goals;
-  try { goals = await loadGoals(db); } catch (e) { return reply({ error: e.message, detail: e.detail }, 500); }
+  try { goals = await loadGoals(db, user.id); } catch (e) { return reply({ error: e.message, detail: e.detail }, 500); }
   const { byId, kids, pathOf } = indexTree(goals);
   const goal = byId[body.goalId];
   if (!goal) return reply({ error: 'Goal not found.' }, 404);

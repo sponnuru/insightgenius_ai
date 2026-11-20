@@ -185,3 +185,36 @@ input[type=checkbox] { accent-color: var(--teal); width: 17px; height: 17px; mar
   .topbar { padding: 10px 16px; flex-wrap: wrap; }
   .topbar .save { display: none; }
 }
+
+/* 3D galaxy view */
+.galaxy-pane { background: #05060f; overflow: hidden; position: relative; }
+.galaxy { position: absolute; inset: 0; }
+.galaxy canvas { display: block; cursor: grab; touch-action: none; }
+.galaxy-reset { position: absolute; right: 12px; top: 12px; background: rgba(22,26,46,.85); color: #e9e8f4; border-color: #343a5e; }
+
+/* Tree effects */
+.node.flash { animation: flyin .5s ease-out; transform-box: fill-box; transform-origin: center; }
+@keyframes flyin { from { transform: translateX(-60px) scale(.7); opacity: 0; } to { transform: none; opacity: 1; } }
+.sig-up { fill: var(--teal); font-weight: 700; }
+.sig-down { fill: var(--red); font-weight: 700; }
+.confetti { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 60; }
+@media (prefers-reduced-motion: reduce) {
+  .node.flash, .node.busy > .bg, .node.flash > .bg { animation: none; }
+}
+
+/* My data */
+.mydata { margin-bottom: 16px; }
+.src { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; background: var(--card-in); display: flex; flex-direction: column; gap: 6px; }
+.src + .src { margin-top: 8px; }
+.src.add { border-style: dashed; }
+.filebtn { cursor: pointer; align-self: flex-start; }
+.signals { border-top: 1px solid var(--line); padding-top: 10px; }
+.sig { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); align-items: flex-start; }
+.pill.trend.up { background: rgba(63,156,136,.16); color: var(--teal); }
+.pill.trend.down { background: rgba(224,96,96,.16); color: var(--red); }
+.pill.trend.flat { background: rgba(155,154,180,.16); color: var(--muted); }
+.datasays { margin-top: 10px; border-left: 3px solid var(--muted); padding: 6px 10px; background: var(--card-in); border-radius: 0 10px 10px 0; }
+.datasays.up { border-color: var(--teal); }
+.datasays.down { border-color: var(--red); }
+.trend-word.up { color: var(--teal); font-weight: 700; }
+.trend-word.down { color: var(--red); font-weight: 700; }

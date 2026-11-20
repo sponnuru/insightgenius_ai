@@ -45,7 +45,7 @@ const activate = (fn) => ({
   onKeyDown: (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); fn(); } },
 });
 
-export default function GoalTree({ goals, name, selectedId, collapsed, busyIds, flashIds, onSelect, onToggle, onDelete, onDo, onBreak }) {
+export default function GoalTree({ goals, name, selectedId, collapsed, busyIds, flashIds, signals = {}, readOnly = false, commentCounts = {}, onSelect, onToggle, onDelete, onDo, onBreak }) {
   const { parentOf, children, countDesc } = buildTree(goals);
   const { pos, rows, maxDepth } = layout(children, collapsed);
   const W = PAD * 2 + maxDepth * COL + NW + TOG;
@@ -91,7 +91,11 @@ export default function GoalTree({ goals, name, selectedId, collapsed, busyIds, 
             {lines.map((l, i) => (
               <text key={i} x={p.x + 24} y={p.y + 24 + i * 17} className="t">{l}</text>
             ))}
-            <text x={p.x + 24} y={p.y + 61} className="s">{status}</text>
+            <text x={p.x + 24} y={p.y + 61} className="s">
+              {signals[g.id] === 'up' && <tspan className="sig-up">▲ </tspan>}
+              {signals[g.id] === 'down' && <tspan className="sig-down">▼ </tspan>}
+              {status}{commentCounts[g.id] ? ` · 💬 ${commentCounts[g.id]}` : ''}
+            </text>
             <rect x={p.x + 24} y={p.y + NH - 9} width={NW - 48} height="3" rx="1.5" className="bar" />
             <rect x={p.x + 24} y={p.y + NH - 9} width={((NW - 48) * Math.min(100, g.progress)) / 100} height="3" rx="1.5" className="bar-on" />
             {g.result && (
@@ -100,6 +104,7 @@ export default function GoalTree({ goals, name, selectedId, collapsed, busyIds, 
               </text>
             )}
 
+            {!readOnly && <>
             <g className="nb del" tabIndex={0} role="button" aria-label={`Delete ${g.title}`} {...activate(() => onDelete(g))}>
               <rect x={bx - 92} y={p.y + 8} width="22" height="20" rx="6" />
               <text x={bx - 81} y={p.y + 22} textAnchor="middle">×</text>
@@ -112,6 +117,7 @@ export default function GoalTree({ goals, name, selectedId, collapsed, busyIds, 
               <rect x={bx - 34} y={p.y + 8} width="24" height="20" rx="6" />
               <text x={bx - 22} y={p.y + 22} textAnchor="middle">✦</text>
             </g>
+            </>}
 
             {kids.length > 0 && (
               <g className="tog" tabIndex={0} role="button" aria-label={isCollapsed ? `Expand ${g.title}` : `Collapse ${g.title}`}
